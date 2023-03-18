@@ -1,3 +1,4 @@
+# Import necessary libraries
 import os
 import re
 from pathlib import Path
@@ -9,7 +10,9 @@ import email.utils
 import datetime
 
 
+# Define a function to sanitize filenames
 def sanitize_filename(filename, max_length=250):
+    # Check if the filename is a valid string
     if not isinstance(filename, str):
         log_error('Invalid filename', filename)
         return 'unknown_subject'
@@ -23,17 +26,21 @@ def sanitize_filename(filename, max_length=250):
     legal_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _-')
     filename = ''.join(c for c in filename if c in legal_chars)
 
+    # Truncate the filename if it's too long
     if len(filename) > max_length:
         log_error("Filename too long", f"filename: {filename}")
         filename = filename[:max_length]
     return filename
 
+# Define a function to get the sender's name
 def get_sender_name(msg):
+    # Get the sender's email address
     sender = msg['From']
     if not sender:
         return "Unknown"
 
     try:
+        # Parse the sender's name and email address
         name, addr = email.utils.parseaddr(str(sender))
         if name:
             return name
@@ -42,6 +49,7 @@ def get_sender_name(msg):
         log_error("Error parsing sender name", f"sender: {sender}, error: {str(e)}")
         return "Error_parsing_sender"
 
+# Define a function to truncate filenames
 def truncate_filename(filename, max_length):
     basename, ext = os.path.splitext(filename)
     if len(basename) > max_length:
@@ -50,10 +58,12 @@ def truncate_filename(filename, max_length):
     else:
         return filename
 
+# Define a function to log errors
 def log_error(message, details):
     with open(os.path.join(source_dir, 'errors.txt'), 'a') as f:
         f.write(f"{message}: {details}\n")
 
+# Define a function to decode email payloads
 def decode_payload(part):
     charset = part.get_content_charset() or 'utf-8'
 
@@ -63,6 +73,7 @@ def decode_payload(part):
 
     payload = part.get_payload(decode=True)
 
+    # Try to decode the payload using different charsets
     try:
         return payload.decode(charset)
     except LookupError:
@@ -83,11 +94,13 @@ def decode_payload(part):
     log_error('Failed to decode payload', f'charset: {charset}')
     return ''
 
+# Define a function to extract email attachments
 def extract_attachments(msg, output_dir):
     attachment_links = []
     attachments_dir = os.path.join(output_dir, "Attachments")
     os.makedirs(attachments_dir, exist_ok=True)
 
+    # Iterate through email parts to find attachments
     for part in msg.walk():
         if part.get_content_maintype() == "multipart":
             continue
@@ -120,6 +133,7 @@ def extract_attachments(msg, output_dir):
 
     return attachment_links
 
+# Define a function to process each email
 def process_email(msg, source_dir):
     try:
         # Get the email headers
@@ -147,7 +161,8 @@ def process_email(msg, source_dir):
 
         # Write the email headers to the output file
         with open(output_file_path, 'w', encoding='utf-8') as f:
-            # Write the simplified header block to the output file
+            # Write the simplified  markdown header block to the output file
+            # Open and close a Markdown code block
             f.write("```markdown\n")
             f.write(f"**From:** {sender}\n")
             f.write(f"**To:** {to}\n")
@@ -176,20 +191,22 @@ def process_email(msg, source_dir):
         print(f"Converted: {output_file_path}")
     except Exception as e:
         log_error("Failed to process email", str(e))
-
-
-
-            
+        
+# Define a function to process mbox mailboxes
 def process_mbox(source_file, source_dir):
     mbox = mailbox.mbox(source_file, create=False)
     mbox.lock()
 
     try:
+        # Iterate through all the emails in the mailbox and process each one
         for msg in mbox:
             process_email(msg, source_dir)
     finally:
         mbox.unlock()
-        
+
+# Set the source file and source directory
 source_file = '/Users/path/to/your.mbox'
 source_dir = os.path.dirname(source_file)
-process_mbox(source_file, source_dir)        
+
+# Call the process_mbox function to start the mbox to markdown conversion
+process_mbox(source_file, source_dir)
