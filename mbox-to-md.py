@@ -8,6 +8,9 @@ from email import policy
 import base64
 import email.utils
 import datetime
+import hashlib
+# import filecmp
+# from tempfile import NamedTemporaryFile
 
 
 # Define a function to sanitize filenames
@@ -95,12 +98,14 @@ def decode_payload(part):
     return ''
 
 # Define a function to extract email attachments
-def extract_attachments(msg, output_dir):
+def extract_attachments(msg, output_dir,output_file_name):
     attachment_links = []
-    attachments_dir = os.path.join(output_dir, "Attachments")
-    os.makedirs(attachments_dir, exist_ok=True)
 
-    # Iterate through email parts to find attachments
+    def file_checksum(file_path):
+        with open(file_path, 'rb') as f:
+            file_data = f.read()
+        return hashlib.sha256(file_data).hexdigest()
+
     for part in msg.walk():
         if part.get_content_maintype() == "multipart":
             continue
@@ -111,25 +116,39 @@ def extract_attachments(msg, output_dir):
         if not filename:
             continue
 
+        attachments_dir = os.path.join(output_dir, "Attachments")
+        os.makedirs(attachments_dir, exist_ok=True)
+
         file_path = os.path.join(attachments_dir, filename)
 
-        # Ensure that the file does not already exist
-        counter = 1
-        while os.path.isfile(file_path):
-            name, ext = os.path.splitext(filename)
-            new_filename = f"{name}_{counter}{ext}"
-            file_path = os.path.join(attachments_dir, new_filename)
-            counter += 1
-
-        # Check if the payload is not None before writing the attachment
         payload = part.get_payload(decode=True)
         if payload:
-            with open(file_path, "wb") as f:
-                f.write(payload)
-        else:
-            log_error("Attachment payload is None", f"filename: {filename}")
+            payload_checksum = hashlib.sha256(payload).hexdigest()
+            existing_file = None
 
-        attachment_links.append(f"[{filename}]({file_path})")
+            for existing_filename in os.listdir(attachments_dir):
+                existing_file_path = os.path.join(attachments_dir, existing_filename)
+                if (os.path.isfile(existing_file_path) and
+                    existing_filename == filename and
+                    file_checksum(existing_file_path) == payload_checksum):
+                    existing_file = existing_file_path
+                    break
+
+            if existing_file is None:
+                counter = 1
+                while os.path.isfile(file_path):
+                    name, ext = os.path.splitext(filename)
+                    new_filename = f"{name}_{counter}{ext}"
+                    file_path = os.path.join(attachments_dir, new_filename)
+                    counter += 1
+
+                with open(file_path, "wb") as f:
+                    f.write(payload)
+                attachment_links.append(f"[{filename}]({file_path})")
+                message_filename = os.path.basename(output_dir)
+                log_error(f"Attachment - {output_file_name} -->", f"{filename}")
+            else:
+                attachment_links.append(f"[{filename}]({existing_file})")
 
     return attachment_links
 
@@ -146,7 +165,7 @@ def process_email(msg, source_dir):
         sent_date = msg['Date']
         parsed_date = email.utils.parsedate_to_datetime(sent_date)
         if parsed_date:
-            formatted_date = parsed_date.strftime('%Y-%m-%d %H-%M-%S')
+            formatted_date = parsed_date.strftime('(%Y-%m-%d) %H-%M-%S')
         else:
             formatted_date = "unknown_date"
             log_error("Failed to parse date", sent_date)
@@ -154,15 +173,14 @@ def process_email(msg, source_dir):
         # Create the output file name and path
         sender_name = get_sender_name(msg)
         sanitized_subject = sanitize_filename(subject)
-        output_file_name = f"({formatted_date}) {sender_name} -- {sanitized_subject}.md"
+        output_file_name = f"{formatted_date} {sender_name} -- {sanitized_subject}.md"
         output_dir = os.path.join(source_dir, sender_name)
         os.makedirs(output_dir, exist_ok=True)
         output_file_path = os.path.join(output_dir, output_file_name)
 
         # Write the email headers to the output file
         with open(output_file_path, 'w', encoding='utf-8') as f:
-            # Write the simplified  markdown header block to the output file
-            # Open and close a Markdown code block
+            # Write the simplified header block to the output file
             f.write("```markdown\n")
             f.write(f"**From:** {sender}\n")
             f.write(f"**To:** {to}\n")
@@ -182,7 +200,7 @@ def process_email(msg, source_dir):
                     f.write(decode_payload(msg))
 
             # Write the attachment links to the output file
-            attachment_links = extract_attachments(msg, output_dir)
+            attachment_links = extract_attachments(msg, output_dir, output_file_name)
             if attachment_links:
                 f.write("\n\nAttachments:\n")
                 for link in attachment_links:
@@ -191,7 +209,7 @@ def process_email(msg, source_dir):
         print(f"Converted: {output_file_path}")
     except Exception as e:
         log_error("Failed to process email", str(e))
-        
+
 # Define a function to process mbox mailboxes
 def process_mbox(source_file, source_dir):
     mbox = mailbox.mbox(source_file, create=False)
@@ -205,8 +223,10 @@ def process_mbox(source_file, source_dir):
         mbox.unlock()
 
 # Set the source file and source directory
-source_file = '/Users/path/to/your.mbox'
+source_file = '/Users/your/directory/name/sample.mbox'
 source_dir = os.path.dirname(source_file)
 
 # Call the process_mbox function to start the mbox to markdown conversion
 process_mbox(source_file, source_dir)
+        
+       
